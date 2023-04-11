@@ -301,8 +301,6 @@ def build_pyramid(fpfh_list, vertices, faces, p_feature):
         np.array(gw_five), \
         np.array(gw_six)
 
-    gw = gw_six - gw_one
-
     return gw
 
 def main():
