@@ -14,12 +14,14 @@ from saliency_method import *
 # from gbvs import gbvs_saliency
 from skimage import exposure
 
+# 利用重心插值得到面的mc
 def get_fmc(mc, vertices, faces):
     fmc = [0 for i in range(len(faces))]
     for face_i in range(len(faces)):
         face_3p = faces[face_i]
         p1, p2, p3 = face_3p[0], face_3p[1], face_3p[2]
         w1, w2, w3 = myutil.barycenter(vertices[p1], vertices[p2], vertices[p3])
+        # 得到重心权重，然后分别乘上对应的mc
         fmc[face_i] = w1 * mc[p1] + w2 * mc[p2] + w3 * mc[p3]
     return fmc
 
@@ -138,6 +140,7 @@ def face_to_rgb(face):
     rgb.reverse()
     return rgb
 
+# 基于曲率加权
 def f2v_mc(vertices, faces, face_saliency, fmc):
     v_to_triangles = myutil.get_vertex_to_face(faces)
     # face saliency to vertex saliency based on the area of triangle
@@ -174,6 +177,8 @@ def generate_multiview_saliency(data_name, number):
     # load the multi-view images
     rgb_pic_name = []
     dis = int(360 / number)
+    # dis = 270
+    # 按照number的数量导入相应的图片
     for i in range(number):
         path = "E:\\Dataset\\pic\\paper_" + \
                 data_name + "\\video0\\" + str(dis * i + 15) + ".png"
@@ -236,6 +241,7 @@ def generate_multiview_saliency(data_name, number):
                 else:
                     pic_dict[face_index].append(labs[p][i][j])
 
+        # 对pic_dict进行平均
         for key in pic_dict.keys():
             pic_dict[key] = np.mean(pic_dict[key])  # face_index->multi saliency, so mean them
 
@@ -244,8 +250,10 @@ def generate_multiview_saliency(data_name, number):
     return vertices, faces, res_dict_list
 
 def unified_scale_song(vertices, faces, res_dict_list):
+    # 实现song的方法，思路就是 获取当前view的SaliencyMap，然后获取空间点的Saliency，以及求得其normalizedAverageDisatance
     v_to_face = myutil.get_vertex_to_face(faces)
     v_n_dist = myutil.get_v_normal_dist(v_to_face, vertices, faces)
+    # 对每个views下的face做一个统计，然后对最后得到的vertex Saliency求vertexSaliency
 
     vertex_saliency = np.zeros(len(vertices))
     # current view face_saliency
@@ -273,6 +281,7 @@ def unified_scale_song(vertices, faces, res_dict_list):
 
     return vertex_saliency / len(res_dict_list)
 
+# 将Song的算法的基本单元改成面片
 def unified_scale_song_edit(vertices, faces, res_dict_list):
     tri_to_tris = myutil.compute_tri_with_tri(vertices, faces)
     # container
@@ -283,6 +292,7 @@ def unified_scale_song_edit(vertices, faces, res_dict_list):
         for k, v in res_dict.items():
             if k < len(faces):
                 fs[k] = v
+        #
         for fs_i in range(len(fs)):
             fs[fs_i] = np.exp(1-tri_to_n_dist[fs_i])/np.exp(1-fs[fs_i])
 
@@ -300,6 +310,7 @@ def unified_scale_median(number, mc, fmc, vertices, faces, res_dict_list):
     tri_to_n_dist = myutil.get_tri_normal_dist(tri_to_tris, vertices, faces)
 
     high_curvature = set()
+    # 两个两个的循环
     for num_i in range(number - 1):
         print(">> current fusion index is {}".format(num_i))
         res_dict = [res_dict_list[num_i], res_dict_list[num_i + 1]]
@@ -309,11 +320,13 @@ def unified_scale_median(number, mc, fmc, vertices, faces, res_dict_list):
         for i in range(len(faces)):
             face_saliency.append([0])
 
+        # 排序的内容
         for d in res_dict:
             for k, v in d.items():
                 if k < len(faces):
                     face_saliency[k].append(v)
 
+        # 得到2个image对应的mesh face saliency
         # f_mc_list = [mc1, mc2, mc3...], f_mc_list_index = [mc1->face_index, ... ,]
         f_mc_list = []
         f_mc_list_index = []
@@ -321,19 +334,39 @@ def unified_scale_median(number, mc, fmc, vertices, faces, res_dict_list):
             f = face_saliency[index]
             three_p = faces[index]
             f_mc = (mc[three_p[0]] + mc[three_p[1]] + mc[three_p[2]]) / 3
+            # 获取重合部分所有面的平均曲率
             if len(f) > 2:
                 f_mc_list.append(f_mc)
                 f_mc_list_index.append(index)
+        print("f_mc", f_mc_list[:100])
+        # exit(0)
 
+        # 然后得到最大曲率面片，得到其不同Images下的Saliency Rate
+        # f_mc_peak = max(f_mc_list)
+
+        # 得到中位数
         f_mc_peak = sorted(f_mc_list)[int(len(f_mc_list) / 2)]
+        print("f_mc_median", f_mc_peak)
         f_mc_peak_index = f_mc_list_index[f_mc_list.index(f_mc_peak)]
         final_rate = res_dict[1][f_mc_peak_index] / res_dict[0][f_mc_peak_index]
+        print("f_mc_median_rate", final_rate)
 
+        # 计算所有重合面片的SaliencyRate，然后可视化
+        rate_list = []
+        face_rate = [0 for i in range(len(faces))]
+        face_fmc = [0 for i in range(len(faces))]
+
+        # 计算重合部分的曲率
         for i in range(len(f_mc_list_index)):
             index = f_mc_list_index[i]
             f_mc = fmc[index]
             face_fmc[index] = f_mc
 
+        print("f-mc", f_mc)
+
+        c1 = []
+        c2 = []
+        # 计算重合部分的rate
         for f_mc_peak in f_mc_list:
             f_mc_peak_index = f_mc_list_index[f_mc_list.index(f_mc_peak)]
             print(f_mc_peak_index)
@@ -345,14 +378,58 @@ def unified_scale_median(number, mc, fmc, vertices, faces, res_dict_list):
                 c2.append(res_dict[0][f_mc_peak_index])
         print(rate_list[:10])
         
+        with open("E:\\c1.txt", "w") as file:
+            for c in c1:
+                file.write(str(c)+"\n")
+            file.close()
+        with open("E:\\c2.txt", "w") as file:
+            for c in c2:
+                file.write(str(c)+"\n")
+            file.close()
+        # c1和c2的直方图
+        # plt.subplot(121)
+        # plt.hist(c1)
+        # plt.subplot(122)
+        # plt.hist(c2)
+        # plt.show()
+
+        # exit(0)
+
+
+        #
         mean_rate = np.sum(rate_list) / len(rate_list)
         median_rate = np.median(rate_list)
         print("mean_rate = ", mean_rate)
         print("median_rate = ", median_rate)
 
+        # rate_list.append(99999)
+        # write_vs(str(number), rate_list)
+
+        # 重合部分的Rate分布如何？
+        # myutil.mayavi_with_custom_face(vertices, faces, face_rate)
+        # mlab.show()
+
+        n, bins, patches = plt.hist(rate_list, bins=100, density=True)
+        print(bins)
+        print(n)
+        plt.show()
+
+        # final_rate = 1.0
         final_rate = median_rate
+        # 将这个rate扩展到所有的数值中
         for k, v in res_dict[1].items():
             res_dict[1][k] /= final_rate
+
+        # 记录下重合部分中的high curvature部分
+        face_fmc = np.array(face_fmc)
+        face_fmc = face_fmc / np.max(face_fmc)
+        for face_i in range(len(face_fmc)):
+            face_mc = face_fmc[face_i]
+            if face_mc > 0.2:
+                high_curvature.add(face_i)
+
+        # plt.hist(face_fmc)
+        # plt.show()
 
         res_dict_list[num_i] = res_dict[0]
         res_dict_list[num_i+1] = res_dict[1]
@@ -362,21 +439,25 @@ def unified_scale_median(number, mc, fmc, vertices, faces, res_dict_list):
     for i in range(len(faces)):
         face_saliency.append([0])
 
+    # 对排序后的局部mesh saliency进行合成
     for d in res_dict_list:
         for k, v in d.items():
             if k < len(faces):
                 face_saliency[k].append(v)
 
+    # 简单融合，只是将尺度归一之后，然后对于相交的部分进行了简单的平均操作
     for f_s_i in range(len(face_saliency)):
         f_s = face_saliency[f_s_i]
         face_saliency[f_s_i] = np.mean(f_s)
 
-    # high_curvature = list(high_curvature)
-    # for face_i in high_curvature:
-    #     # augment
-    #     augment = np.exp(1 - tri_to_n_dist[face_i]) / np.exp(1 - face_saliency[face_i])
-    #     augment = 1.0
-    #     face_saliency[face_i] *= augment
+    # 整体扩散完全后，针对曲率高的部分做一个增强
+    high_curvature = list(high_curvature)
+    print("{} face saliency changed".format(len(high_curvature)))
+    for face_i in high_curvature:
+        # augment
+        augment = np.exp(1 - tri_to_n_dist[face_i]) / np.exp(1 - face_saliency[face_i])
+        augment = 1.0
+        face_saliency[face_i] *= augment
 
     # 基于面积的加权；基于曲率的加权；多尺度加权；假设点的SaliencyMap=面的Saliency的平均
     vertex_saliency = myutil.f2v(vertices, faces, face_saliency)
@@ -398,6 +479,7 @@ def my_method(data_name, number):
     mc = np.array([np.float(s) for s in lines])
     mc = np.array([1.0 for s in lines])
     mc = exposure.equalize_hist(mc)
+    # 获取face mc
     fmc = get_fmc(mc, vertices, faces)
 
     # recurrent two images move on with median rate in intersection part
@@ -405,6 +487,15 @@ def my_method(data_name, number):
     vertex_saliency = unified_scale_median(number, mc, fmc, vertices, faces, res_dict_list)
     time2 = time.time()
     print("时间是", time2 - time1)
+
+    # 记录下计算出的结果
+    # write_vs(data_name, vertex_saliency)
+
+    # 2D to 3D based on song
+    # vertex_saliency = unified_scale_song(vertices, faces, res_dict_list)
+
+    # 2D to 3D based on song change
+    # vertex_saliency = unified_scale_song_edit(vertices, faces, res_dict_list)
 
     # mayavi figure
     white = (1, 1, 1)
@@ -446,3 +537,6 @@ if __name__ == "__main__":
     # tri_to_tris = myutil.compute_tri_with_tri(vertices, faces)
     # tri_to_n_dist = myutil.get_tri_normal_dist(tri_to_tris, vertices, faces)
 
+'''
+顺序的2个递推的进行SaliencySortting，then fusing these saliency with weighted or meaning?
+'''
